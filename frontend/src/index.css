@@ -2,7 +2,6 @@
 @tailwind components;
 @tailwind utilities;
 
-
 :root {
   font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
   line-height: 1.5;
@@ -73,6 +72,16 @@ button:hover {
 button:active {
   background-color: #a0e743;
   box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+}
+
+
+/* Locate Button */
+.locate-button {
+  background-color: #28a745;
+}
+
+.locate-button:hover {
+  background-color: #218838;
 }
 
 /* Tab */
@@ -175,3 +184,4 @@ button:focus-visible {
     background-color: #f9f9f9;
   }
 }
+

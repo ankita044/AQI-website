@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 
 const App = () => {
@@ -11,23 +11,53 @@ const App = () => {
     try {
       const response = await axios.post('http://127.0.0.1:5000/get-aqi', { city });
       const data = response.data;
-  
+
       console.log('Fetched Data:', data);
-  
+
       if (type === 'all') {
-        // Reordering keys in the desired sequence
         const orderedData = {
-          
-          "PM25": data.pm25,
-          "PM10": data.pm10,
-          "O3": data.o3,
-          "NO2": data.no2,
-          "SO2": data.so2,
-          "CO": data.co,
+          City: data.city,
+          'Live AQI': data.predicted_aqi,
+          Level: data.aqi_category,
+          pm25: data.pm25,
+          pm10: data.pm10,
+          o3: data.o3,
+          no2: data.no2,
+          so2: data.so2,
+          co: data.co,
         };
         setData(orderedData);
+
+        // Send city and AQI to map
+        const iframe = document.querySelector("iframe[name='qgis-map']");
+        if (iframe) {
+          iframe.contentWindow.postMessage(
+            {
+              type: 'aqi',
+              city,
+              lat: data.lat,
+              lng: data.lng,
+              value: data.predicted_aqi,
+              zoom: 12,
+            },
+            "*"
+          );
+        }
       } else if (data.hasOwnProperty(type.toLowerCase())) {
         setData({ [type]: data[type.toLowerCase()] });
+
+        // Send pollutant info to map
+        const iframe = document.querySelector("iframe[name='qgis-map']");
+        if (iframe) {
+          iframe.contentWindow.postMessage(
+            {
+              type: 'pollutant',
+              layer: type.toLowerCase(),
+              value: data[type.toLowerCase()],
+            },
+            "*"
+          );
+        }
       } else {
         setError(`No data available for ${type}`);
       }
@@ -40,59 +70,60 @@ const App = () => {
     <div className="flex flex-col items-center justify-center min-h-screen bg-gray-100 p-4">
       {/* Search Bar */}
       <div className="search-container">
-        <input  
+        <input
           type="text"
           value={city}
           onChange={(e) => setCity(e.target.value)}
           placeholder="Enter city name"
-          className="search-bar"
+          className="search-bar border rounded px-4 py-2"
         />
-        
-        {/* Get AQI Button */}
-        <button 
+        <button
           onClick={() => fetchAQI('all')}
-          className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-700"
+          className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-700 ml-2"
         >
           Get AQI
         </button>
+      </div>
 
-              {/* ✅ New Container for City, Live AQI, and Category */}
-      {data && (
-        <div className="flex flex-col gap-2 bg-blue-100 border border-blue-300 p-4 rounded-lg shadow-md mb-4">
-          <p className="text-lg font-semibold text-gray-800">
-            <span className="text-blue-700">City:</span> {data.city}
-          </p>
-          <p className="text-lg font-semibold text-gray-800">
-            <span className="text-blue-700">Live AQI:</span> {data.predicted_aqi}
-          </p>
-          <p className="text-lg font-semibold text-gray-800">
-            <span className="text-blue-700">AQI Category:</span> {data.aqi_category}
-          </p>
-        </div>
-      )}
-
-        {/* Individual Parameter Buttons */}
-        <div className="button-container">
-            <button onClick={() => fetchAQI('PM25')} className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-700">PM25</button>
-            <button onClick={() => fetchAQI('PM10')} className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-700">PM10</button>
-            <button onClick={() => fetchAQI('O3')} className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-700">O3</button>
-            <button onClick={() => fetchAQI('NO2')} className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-700">NO2</button>
-            <button onClick={() => fetchAQI('SO2')} className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-700">SO2</button>
-            <button onClick={() => fetchAQI('CO')} className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-700">CO</button>
-        </div>
+      {/* Individual Pollutant Buttons */}
+      <div className="button-container mt-2">
+        {['PM25', 'PM10', 'O3', 'NO2', 'SO2', 'CO'].map((param) => (
+          <button
+            key={param}
+            onClick={() => fetchAQI(param)}
+            className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-700 m-1"
+          >
+            {param}
+          </button>
+        ))}
       </div>
 
       {/* Error Display */}
       {error && <p className="text-red-500 mt-4">{error}</p>}
-      
+
       {/* Data Display */}
       {data && (
-        <div className="mt-4">
+        <div className="mt-4 w-1/2">
           {Object.entries(data).map(([key, value]) => (
-            <p key={key}><strong>{key}:</strong> {value}</p>
+            <p key={key}>
+              <strong>{key}:</strong> {value}
+            </p>
           ))}
         </div>
       )}
+
+      {/* QGIS Map */}
+    <div className="mt-4 w-1/2 h-64">
+      <div style={{ width: '800px'}}>
+        <iframe
+          src="/map/index.html"
+          name="qgis-map"
+          title="QGIS Map"
+          style={{ width: '100%', height: '500px', border: 'none', paddingLeft:'850px', paddingTop:'30px'}}
+        ></iframe>
+      </div>
+    </div>
+
     </div>
   );
 };

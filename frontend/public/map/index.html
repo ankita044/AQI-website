@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="initial-scale=1,user-scalable=no,maximum-scale=1,width=device-width">
+    <link rel="stylesheet" href="css/leaflet.css">
+    <link rel="stylesheet" href="css/L.Control.Layers.Tree.css">
+    <link rel="stylesheet" href="css/qgis2web.css">
+    <link rel="stylesheet" href="css/fontawesome-all.min.css">
+    <link rel="stylesheet" href="css/leaflet-measure.css">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.css" />
+    <style>
+        html, body, #map {
+            width: 100%;
+            height: 100%;
+            padding: 0;
+            margin: 0;
+        }
+    </style>
+    <title>Air Quality Map</title>
+</head>
+<body>
+    <div id="map"></div>
+
+    <script src="js/leaflet.js"></script>
+    <script src="js/L.Control.Layers.Tree.min.js"></script>
+    <script src="js/leaflet-measure.js"></script>
+    <script src="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.js"></script>
+
+    <script>
+        var map = L.map('map', {
+            zoomControl: false,
+            maxZoom: 28,
+            minZoom: 1
+        }).fitBounds([[-8.0362, 56.8508], [32.6450, 136.0803]]);
+
+        var initialBounds = map.getBounds();
+
+        // Zoom Control
+        L.control.zoom({ position: 'topleft' }).addTo(map);
+
+        // Search Bar
+        var geocoder = L.Control.geocoder({
+            defaultMarkGeocode: false
+        }).on('markgeocode', function(e) {
+            var latlng = e.geocode.center;
+            map.setView(latlng, 12);
+        }).addTo(map);
+
+        setTimeout(() => {
+            let searchInput = document.querySelector(".leaflet-control-geocoder-form input");
+            if (searchInput) {
+                searchInput.addEventListener("input", function() {
+                    if (this.value.trim() === "") {
+                        map.fitBounds(initialBounds);
+                    }
+                });
+            }
+        }, 1000);
+
+        // Base Layer
+        var baseLayer = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            opacity: 1.0,
+            minZoom: 1,
+            maxZoom: 28
+        }).addTo(map);
+
+        // AQI Layers
+        var layer_AQI = L.tileLayer('https://tiles.aqicn.org/tiles/usepa-aqi/{z}/{x}/{y}.png?token=64290e07f158484e2d2f271320fe1826ce447c34', { opacity: 1.0 }).addTo(map);
+        var layer_PM25 = L.tileLayer('https://tiles.aqicn.org/tiles/usepa-pm25/{z}/{x}/{y}.png?token=64290e07f158484e2d2f271320fe1826ce447c34', { opacity: 1.0 });
+        var layer_PM10 = L.tileLayer('https://tiles.aqicn.org/tiles/usepa-10/{z}/{x}/{y}.png?token=64290e07f158484e2d2f271320fe1826ce447c34', { opacity: 1.0 });
+        var layer_Ozone = L.tileLayer('https://tiles.aqicn.org/tiles/usepa-o3/{z}/{x}/{y}.png?token=64290e07f158484e2d2f271320fe1826ce447c34', { opacity: 1.0 });
+        var layer_NO2 = L.tileLayer('https://tiles.aqicn.org/tiles/usepa-no2/{z}/{x}/{y}.png?token=64290e07f158484e2d2f271320fe1826ce447c34', { opacity: 1.0 });
+        var layer_CO = L.tileLayer('https://tiles.aqicn.org/tiles/usepa-co/{z}/{x}/{y}.png?token=64290e07f158484e2d2f271320fe1826ce447c34', { opacity: 1.0 });
+        var layer_SO2 = L.tileLayer('https://tiles.aqicn.org/tiles/usepa-so2/{z}/{x}/{y}.png?token=64290e07f158484e2d2f271320fe1826ce447c34', { opacity: 1.0 });
+
+        var overlayLayers = {
+            "AQI": layer_AQI,
+            "PM2.5": layer_PM25,
+            "PM10": layer_PM10,
+            "Ozone (O₃)": layer_Ozone,
+            "Nitrogen Dioxide (NO₂)": layer_NO2,
+            "Carbon Monoxide (CO)": layer_CO,
+            "Sulfur Dioxide (SO₂)": layer_SO2
+        };
+
+        var layerControl = L.control.layers(null, overlayLayers, { collapsed: true }).addTo(map);
+
+        // ✅ Handle Layer Switching ✅
+        window.addEventListener("message", (event) => {
+            console.log("Received message:", event.data);
+            const { layer, value, lat, lng } = event.data;
+
+            if (layer) {
+                // Turn off all layers
+                Object.values(overlayLayers).forEach((layer) => {
+                    map.removeLayer(layer);
+                });
+
+                // Turn on the selected layer
+                switch (layer) {
+                    case 'aqi':
+                        map.addLayer(layer_AQI);
+                        break;
+                    case 'pm25':
+                        map.addLayer(layer_PM25);
+                        break;
+                    case 'pm10':
+                        map.addLayer(layer_PM10);
+                        break;
+                    case 'o3':
+                        map.addLayer(layer_Ozone);
+                        break;
+                    case 'no2':
+                        map.addLayer(layer_NO2);
+                        break;
+                    case 'so2':
+                        map.addLayer(layer_SO2);
+                        break;
+                    case 'co':
+                        map.addLayer(layer_CO);
+                        break;
+                    default:
+                        console.warn(`Layer ${layer} not found`);
+                }
+
+                // Place a marker with pollutant value
+                if (lat && lng && value !== undefined) {
+                    L.marker([lat, lng])
+                        .addTo(map)
+                        .bindPopup(`<b>${layer.toUpperCase()}</b>: ${value}`)
+                        .openPopup();
+                }
+            }
+        });
+
+        // ✅ Force AQI Layer on "Get AQI" button click ✅
+        window.addEventListener("message", function(event) {
+            if (event.data.city) {
+                let searchInput = document.querySelector(".leaflet-control-geocoder-form input");
+                if (searchInput) {
+                    searchInput.value = event.data.city;
+
+                    // Simulate an "Enter" key press to trigger geocoding
+                    let enterEvent = new KeyboardEvent('keydown', {
+                        key: 'Enter',
+                        code: 'Enter',
+                        keyCode: 13,
+                        which: 13,
+                        bubbles: true
+                    });
+                    searchInput.dispatchEvent(enterEvent);
+
+                    // Remove all layers before adding AQI layer
+                    Object.values(overlayLayers).forEach(layer => map.removeLayer(layer));
+                    map.addLayer(layer_AQI); // ✅ Ensure AQI is displayed ✅
+                }
+            }
+        });
+
+        // Reset map on reload
+        window.addEventListener('beforeunload', () => {
+            map.fitBounds(initialBounds);
+        });
+    </script>
+</body>
+</html>
