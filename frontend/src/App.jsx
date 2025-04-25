@@ -17,7 +17,13 @@ const App = () => {
   const [routeOptions, setRouteOptions] = useState(null);
   const [selectedRoute, setSelectedRoute] = useState(null);
   const [isRouting, setIsRouting] = useState(false);
+  const [routePreferences, setRoutePreferences] = useState({
+    avoidHighAQI: false,
+    balanceAQIAndTime: false,
+    maxAdditionalTime: 20
+  });
   const recognitionRef = useRef(null);
+  const mapRef = useRef(null);
 
   // Initialize speech recognition
   useEffect(() => {
@@ -55,13 +61,12 @@ const App = () => {
 
   // Process voice commands
   const processVoiceCommand = async (command) => {
-    // Route planning commands
     if (command.includes("best route") || command.includes("cleanest path") || command.includes("safest route")) {
       const routeMatch = command.match(/from (.+) to (.+)/i);
       if (routeMatch && routeMatch[1] && routeMatch[2]) {
         setRouteStart(routeMatch[1]);
         setRouteEnd(routeMatch[2]);
-        speakResponse(`Finding the cleanest air quality route from ${routeMatch[1]} to ${routeMatch[2]}`);
+        speakResponse(`Finding the best route from ${routeMatch[1]} to ${routeMatch[2]}`);
         await findCleanestRoute(routeMatch[1], routeMatch[2]);
       } else {
         speakResponse("Please specify both start and destination locations for route planning.");
@@ -69,7 +74,6 @@ const App = () => {
       return;
     }
 
-    // Existing voice commands...
     let extractedCity = '';
     const cityMatch = command.match(/air quality in (\w+)/i);
     if (cityMatch && cityMatch[1]) {
@@ -124,7 +128,7 @@ const App = () => {
     } else if (command.includes("what does pm10") || command.includes("what is pm 10")) {
       speakResponse("PM10 refers to particulate matter that is 10 micrometers or smaller in diameter. These particles can be inhaled into the lungs and may cause respiratory issues, particularly for sensitive individuals.");
     } else if (command.includes("help") || command.includes("what can you do")) {
-      speakResponse("You can ask me questions like 'How's the air quality in Mumbai today?', 'Is it safe to jog outside?', 'What is PM2.5?', or tell me to 'Find the best route from Delhi to Gurgaon'.");
+      speakResponse("You can ask me questions like 'How's the air quality in Mumbai today?', 'Is it safe to jog outside?', 'What is PM2.5?', or tell me to 'Find the best route from Delhi to Gurgaon'. You can also specify route preferences like 'avoid polluted areas' or 'find the fastest route'.");
     } else {
       speakResponse("I didn't understand that command. Try asking about air quality in a specific city or if it's safe for outdoor activities.");
     }
@@ -136,77 +140,102 @@ const App = () => {
     setError(null);
     
     try {
-      // First geocode the start and end locations
-      const startResponse = await axios.get(
-        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(start)}`
-      );
-      const endResponse = await axios.get(
-        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(end)}`
-      );
-
-      if (startResponse.data.length === 0 || endResponse.data.length === 0) {
-        throw new Error("Could not find one or both locations");
-      }
-
-      const startCoords = {
-        lat: parseFloat(startResponse.data[0].lat),
-        lng: parseFloat(startResponse.data[0].lon)
-      };
-      
-      const endCoords = {
-        lat: parseFloat(endResponse.data[0].lat),
-        lng: parseFloat(endResponse.data[0].lon)
-      };
-
-      // Get route options from backend
-      const routeResponse = await axios.post('http://127.0.0.1:5000/get-routes', {
-        start: startCoords,
-        end: endCoords
+      const response = await axios.post('http://127.0.0.1:5000/get-routes', {
+        start: start,
+        end: end,
+        preferences: routePreferences
+      }, {
+        headers: {
+          'Content-Type': 'application/json'
+        }
       });
 
-      // Process route options
-      const processedRoutes = routeResponse.data.routes.map(route => ({
-        ...route,
-        aqiScore: calculateAQIScore(route.aqiData)
-      }));
-
-      // Sort by AQI score (lower is better)
-      processedRoutes.sort((a, b) => a.aqiScore - b.aqiScore);
-      
-      setRouteOptions(processedRoutes);
-      setSelectedRoute(processedRoutes[0]);
-
-      
-
-      // Send route data to map
-      const iframe = document.querySelector("iframe[name='qgis-map']");
-      if (iframe) {
-        iframe.contentWindow.postMessage(
-          {
-            type: 'route',
-            routes: processedRoutes,
-            selectedRoute: processedRoutes[0].id
-          },
-          "*"
-        );
+      if (!response.data.routes || response.data.routes.length === 0) {
+        throw new Error("No routes found between these locations");
       }
 
-      speakResponse(`Found ${processedRoutes.length} route options. The cleanest air quality route is ${processedRoutes[0].summary} with an average AQI of ${Math.round(processedRoutes[0].aqiScore)}.`);
+      setRouteOptions(response.data.routes);
+      setSelectedRoute(response.data.routes[0]);
+
+      // Send route data to map with green color for selected route
+      updateMapWithRoutes(response.data.routes, response.data.routes[0].id);
+
+      // Generate voice response
+      const bestRoute = response.data.routes[0];
+      const aqiLevel = getAqiLevel(bestRoute.aqiScore);
+      
+      let responseText = `Found ${response.data.routes.length} route option${response.data.routes.length > 1 ? 's' : ''}. `;
+      
+      if (routePreferences.avoidHighAQI && !routePreferences.balanceAQIAndTime) {
+        responseText += `The cleanest air quality route has an average AQI of ${Math.round(bestRoute.aqiScore)} (${aqiLevel})`;
+      } else if (routePreferences.balanceAQIAndTime && !routePreferences.avoidHighAQI) {
+        responseText += `The balanced route has an average AQI of ${Math.round(bestRoute.aqiScore)} and takes ${Math.round(bestRoute.duration)} minutes`;
+      } else if (routePreferences.avoidHighAQI && routePreferences.balanceAQIAndTime) {
+        responseText += `The optimized route balances air quality and time with AQI ${Math.round(bestRoute.aqiScore)} and duration ${Math.round(bestRoute.duration)} minutes`;
+      } else {
+        responseText += `The fastest route takes ${Math.round(bestRoute.duration)} minutes`;
+      }
+      
+      speakResponse(responseText);
     } catch (err) {
-      setError(err.response?.data?.error || 'Failed to find routes');
-      speakResponse("Sorry, I couldn't find a route between those locations.");
+      console.error('Route planning error:', err);
+      const errorMsg = err.response?.data?.error || err.message || 'Failed to find routes';
+      setError(errorMsg);
+      
+      // Only speak error if we didn't find any routes
+      if (!routeOptions || routeOptions.length === 0) {
+        speakResponse("Sorry, I couldn't find a route between those locations.");
+      }
     } finally {
       setIsRouting(false);
     }
   };
 
-  // Calculate AQI score for a route
-  const calculateAQIScore = (aqiData) => {
-    if (!aqiData || aqiData.length === 0) return 0;
-    
-    // Simple average for now - could be weighted by segment length
-    const sum = aqiData.reduce((total, point) => total + point.aqi, 0);
-    return sum / aqiData.length;
+  // Update map with routes
+  const updateMapWithRoutes = (routes, selectedRouteId) => {
+    const iframe = document.querySelector("iframe[name='qgis-map']");
+    if (iframe) {
+      iframe.contentWindow.postMessage(
+        {
+          type: 'route',
+          routes: routes.map(route => ({
+            ...route,
+            color: route.id === selectedRouteId ? '#00FF00' : '#FF0000' // Green for selected, red for others
+          })),
+          selectedRoute: selectedRouteId
+        },
+        "*"
+      );
+    }
+  };
+
+  // Reverse geocode coordinates to city name
+  const reverseGeocode = async (lat, lng) => {
+    try {
+      const response = await axios.get(
+        `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}`,
+        {
+          headers: {
+            'User-Agent': 'AirQualityApp/1.0'
+          }
+        }
+      );
+      return response.data.address.city || 
+             response.data.address.town || 
+             response.data.address.village ||
+             response.data.address.county;
+    } catch (err) {
+      console.error('Reverse geocoding error:', err);
+      return null;
+    }
+  };
+
+  // Estimate health impact of a route
+  const calculateHealthImpact = (aqiScore) => {
+    if (!aqiScore) return 'minimal';
+    if (aqiScore > 150) return 'high';
+    if (aqiScore > 100) return 'moderate';
+    return 'low';
   };
 
   // Select a different route
@@ -214,18 +243,8 @@ const App = () => {
     const route = routeOptions.find(r => r.id === routeId);
     if (route) {
       setSelectedRoute(route);
-      
-      // Update map
-      const iframe = document.querySelector("iframe[name='qgis-map']");
-      if (iframe) {
-        iframe.contentWindow.postMessage(
-          {
-            type: 'route',
-            selectedRoute: route.id
-          },
-          "*"
-        );
-      }
+      updateMapWithRoutes(routeOptions, routeId);
+      speakResponse(`Selected ${route.summary}. This route has an average AQI of ${Math.round(route.aqiScore)} and takes about ${Math.round(route.duration)} minutes.`);
     }
   };
 
@@ -246,6 +265,16 @@ const App = () => {
         "*"
       );
     }
+    
+    speakResponse("Route planning cleared.");
+  };
+
+  // Toggle route preference
+  const toggleRoutePreference = (pref) => {
+    setRoutePreferences(prev => ({
+      ...prev,
+      [pref]: !prev[pref]
+    }));
   };
 
   // Fetch AQI with specific city
@@ -293,7 +322,7 @@ const App = () => {
     } catch (err) {
       const errorMsg = err.response?.data?.error || 'Failed to fetch data';
       setError(errorMsg);
-      speakResponse(`Sorry, I couldn't find air quality data for ${cityName}. ${errorMsg}`);
+      speakResponse(`Sorry, I couldn't find air quality data for ${cityName}.`);
       return null;
     } finally {
       setIsLoading(false);
@@ -305,6 +334,7 @@ const App = () => {
     setVoiceResponse(text);
     
     if ('speechSynthesis' in window) {
+      window.speechSynthesis.cancel(); // Cancel any ongoing speech
       const utterance = new SpeechSynthesisUtterance(text);
       utterance.rate = 1.0;
       utterance.pitch = 1.0;
@@ -330,46 +360,12 @@ const App = () => {
   };
 
   const fetchAQI = async () => {
-    setError(null);
-    setIsLoading(true);
-    try {
-      const response = await axios.post('http://127.0.0.1:5000/get-aqi', { city });
-      const responseData = response.data;
-
-      const processedData = {
-        City: responseData.city,
-        'Live AQI': responseData.predicted_aqi,
-        Level: responseData.aqi_category,
-        PM25: responseData.pm25,
-        PM10: responseData.pm10,
-        O3: responseData.o3,
-        NO2: responseData.no2,
-        SO2: responseData.so2,
-        CO: responseData.co,
-      };
-      setData(processedData);
-      setSelectedPollutant(null);
-
-      // Send full AQI data to map
-      const iframe = document.querySelector("iframe[name='qgis-map']");
-      if (iframe) {
-        iframe.contentWindow.postMessage(
-          {
-            type: 'aqi',
-            city,
-            lat: responseData.lat,
-            lng: responseData.lng,
-            value: responseData.predicted_aqi,
-            zoom: 12,
-          },
-          "*"
-        );
-      }
-    } catch (err) {
-      setError(err.response?.data?.error || 'Failed to fetch data');
-    } finally {
-      setIsLoading(false);
+    if (!city) {
+      setError('City name is required');
+      return;
     }
+    
+    await fetchAQIWithCity(city);
   };
 
   const handlePollutantClick = (pollutant) => {
@@ -409,37 +405,71 @@ const App = () => {
     return 'Hazardous';
   };
 
-  const handleLocateMe = () => {
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        async (position) => {
-          try {
-            const { latitude, longitude } = position.coords;
-            setUserLocation({ lat: latitude, lng: longitude });
-            
-            // Reverse geocode to get city name
-            const response = await axios.get(
-              `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}`
-            );
-            
-            const cityName = response.data.address.city || 
-                            response.data.address.town || 
-                            response.data.address.village;
-            if (cityName) {
-              setCity(cityName);
-              fetchAQI();
-            }
-          } catch (err) {
-            setError('Could not determine your location');
-          }
-        },
-        (error) => {
-          setError('Location access denied. Please enable location services.');
-        }
-      );
-    } else {
-      setError('Geolocation is not supported by your browser');
+  const getHealthImpactColor = (impact) => {
+    switch (impact) {
+      case 'high': return 'health-impact-high';
+      case 'moderate': return 'health-impact-moderate';
+      default: return 'health-impact-low';
     }
+  };
+
+  const handleLocateMe = () => {
+    if (!navigator.geolocation) {
+      setError('Geolocation is not supported by your browser');
+      return;
+    }
+
+    setIsLoading(true);
+    setError(null);
+    
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        try {
+          const { latitude, longitude } = position.coords;
+          setUserLocation({ lat: latitude, lng: longitude });
+          
+          // Reverse geocode to get city name
+          const cityName = await reverseGeocode(latitude, longitude);
+          
+          if (cityName) {
+            setCity(cityName);
+            await fetchAQIWithCity(cityName);
+          } else {
+            setError('Could not determine city name for your location');
+            speakResponse("Sorry, I couldn't determine your current city.");
+          }
+        } catch (err) {
+          setError('Could not determine your location');
+          speakResponse("Sorry, I couldn't determine your location.");
+        } finally {
+          setIsLoading(false);
+        }
+      },
+      (error) => {
+        setIsLoading(false);
+        let errorMsg = '';
+        switch(error.code) {
+          case error.PERMISSION_DENIED:
+            errorMsg = 'Location access denied. Please enable location services in your browser settings.';
+            break;
+          case error.POSITION_UNAVAILABLE:
+            errorMsg = 'Location information is unavailable.';
+            break;
+          case error.TIMEOUT:
+            errorMsg = 'The request to get user location timed out.';
+            break;
+          default:
+            errorMsg = 'An unknown error occurred while getting your location.';
+        }
+        setError(errorMsg);
+        speakResponse("Sorry, I couldn't access your location.");
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 0
+      }
+    );
   };
 
   const calculateSliderPosition = (aqi) => {
@@ -498,169 +528,226 @@ const App = () => {
       </div>
 
       {/* Search and Location */}
-      <div className="search-section">
-        <div className="search-bar-container">
-          <input
-            type="text"
-            value={city}
-            onChange={(e) => setCity(e.target.value)}
-            placeholder="Enter city name"
-            className="search-input"
-          />
-          <button
-            onClick={fetchAQI}
-            disabled={isLoading}
-            className="search-button"
-          >
-            {isLoading ? 'Loading...' : 'Get AQI'}
-          </button>
-          <button
-            onClick={handleLocateMe}
-            className="locate-button"
-          >
-            <span className="location-icon">📍</span> Locate Me
-          </button>
-        </div>
-      </div>
+  <div className="search-section">
+    <div className="search-bar-container">
+      <input
+        type="text"
+        value={city}
+        onChange={(e) => setCity(e.target.value)}
+        placeholder="Enter city name"
+        className="search-input"
+      />
+      <button
+        onClick={fetchAQI}
+        disabled={isLoading}
+        className="search-button"
+      >
+        {isLoading ? 'Loading...' : 'Get AQI'}
+      </button>
+      <button
+        onClick={handleLocateMe}
+        className="locate-button"
+      >
+        <span className="location-icon">📍</span> Locate Me
+      </button>
+    </div>
+  </div>
 
-      {/* Route Planning Section */}
-      {!routeOptions ? (
-        <div className="route-planning-section">
-          <h3>Find Cleanest Route</h3>
-          <div className="route-inputs">
-            <input
-              type="text"
-              value={routeStart}
-              onChange={(e) => setRouteStart(e.target.value)}
-              placeholder="Starting location"
-              className="route-input"
-            />
-            <input
-              type="text"
-              value={routeEnd}
-              onChange={(e) => setRouteEnd(e.target.value)}
-              placeholder="Destination"
-              className="route-input"
-            />
-            <button
-              onClick={() => findCleanestRoute(routeStart, routeEnd)}
-              disabled={isRouting || !routeStart || !routeEnd}
-              className="route-button"
+  {/* Route Planning Section */}
+  <div className="route-planning-section">
+    <h3>Find Cleanest Route</h3>
+    <div className="route-inputs">
+      <input
+        type="text"
+        value={routeStart}
+        onChange={(e) => setRouteStart(e.target.value)}
+        placeholder="Starting location"
+        className="route-input"
+      />
+      <input
+        type="text"
+        value={routeEnd}
+        onChange={(e) => setRouteEnd(e.target.value)}
+        placeholder="Destination"
+        className="route-input"
+      />
+      <button
+        onClick={() => findCleanestRoute(routeStart, routeEnd)}
+        disabled={isRouting || !routeStart || !routeEnd}
+        className="route-button"
+      >
+        {isRouting ? 'Finding Route...' : 'Find Cleanest Route'}
+      </button>
+    </div>
+    
+    <div className="route-preferences">
+      <h4>Route Preferences:</h4>
+      <div className="preference-options">
+        <label className="preference-toggle">
+          <input
+            type="checkbox"
+            checked={routePreferences.avoidHighAQI}
+            onChange={() => toggleRoutePreference('avoidHighAQI')}
+          />
+          <span className="toggle-slider"></span>
+          <span>Avoid high AQI areas</span>
+        </label>
+        
+        <label className="preference-toggle">
+          <input
+            type="checkbox"
+            checked={routePreferences.balanceAQIAndTime}
+            onChange={() => toggleRoutePreference('balanceAQIAndTime')}
+          />
+          <span className="toggle-slider"></span>
+          <span>Balance AQI and travel time</span>
+        </label>
+      </div>
+    </div>
+
+    {/* Route Results - Displayed below the route planning section */}
+    {routeOptions && (
+      <div className="route-results-container">
+        <h4>Route Options (Sorted by Air Quality)</h4>
+        
+        <div className="route-options-list">
+          {routeOptions.map((route) => (
+            <div 
+              key={route.id}
+              className={`route-option ${selectedRoute?.id === route.id ? 'selected' : ''}`}
+              onClick={() => selectRoute(route.id)}
             >
-              {isRouting ? 'Finding Route...' : 'Find Cleanest Route'}
-            </button>
+              <div className="route-option-header">
+                <h5>{route.summary}</h5>
+                <div className={`health-impact ${getHealthImpactColor(route.healthImpact)}`}>
+                  {route.healthImpact} impact
+                </div>
+              </div>
+              
+              <div className="route-stats">
+                <div className="route-stat">
+                  <span className="stat-label">Distance:</span>
+                  <span className="stat-value">{route.distance} km</span>
+                </div>
+                <div className="route-stat">
+                  <span className="stat-label">Duration:</span>
+                  <span className="stat-value">{Math.round(route.duration)} mins</span>
+                </div>
+                <div className="route-stat">
+                  <span className="stat-label">Avg AQI:</span>
+                  <span className={`stat-value ${getAqiColor(Math.round(route.aqiScore))}`}>
+                    {Math.round(route.aqiScore)} ({getAqiLevel(route.aqiScore)})
+                  </span>
+                </div>
+              </div>
+              
+              <div className="aqi-bar-container">
+                <div 
+                  className="aqi-bar" 
+                  style={{ 
+                    width: `${Math.min(100, (route.aqiScore / 300) * 100)}%`,
+                    backgroundColor: `var(--${getAqiColor(Math.round(route.aqiScore))})`
+                  }}
+                ></div>
+              </div>
+            </div>
+          ))}
+        </div>
+        
+        <button 
+          onClick={clearRoutePlanning}
+          className="clear-route-button"
+        >
+          Clear Route
+        </button>
+      </div>
+    )}
+  </div>
+
+  {/* Error Display */}
+  {error && <div className="error-message">{error}</div>}
+
+  {/* Main Content Grid */}
+  <div className="content-grid">
+    {/* AQI Card */}
+    <div className="card aqi-card">
+      <h2>Air Quality Index</h2>
+      {data ? (
+        <div className="aqi-display">
+          <div className={`aqi-value ${getAqiColor(data['Live AQI'])}`}>
+            {data['Live AQI']}
+          </div>
+          <div className="aqi-info">
+            <p className="aqi-level">Air Quality is {getAqiLevel(data['Live AQI'])}</p>
+            <div className="aqi-slider-container">
+              <div className="aqi-slider-labels">
+                <span>Good</span>
+                <span>Moderate</span>
+                <span>Poor</span>
+                <span>Unhealthy</span>
+                <span>Severe</span>
+                <span>Hazardous</span>
+              </div>
+              <div className="aqi-slider-track">
+                <div 
+                  className="aqi-slider-thumb"
+                  style={{ left: `${calculateSliderPosition(data['Live AQI'])}%` }}
+                ></div>
+              </div>
+              <div className="aqi-slider-markers">
+                <span>0</span>
+                <span>50</span>
+                <span>100</span>
+                <span>150</span>
+                <span>200</span>
+                <span>300</span>
+                <span>301+</span>
+              </div>
+            </div>
           </div>
         </div>
       ) : (
-        <div className="route-results-section">
-          <h3>Route Options (Sorted by Air Quality)</h3>
-          <div className="route-options">
-            {routeOptions.map((route) => (
-              <div 
-                key={route.id}
-                className={`route-option ${selectedRoute?.id === route.id ? 'selected' : ''}`}
-                onClick={() => selectRoute(route.id)}
-              >
-                <h4>{route.summary}</h4>
-                <p>Distance: {route.distance} km</p>
-                <p>Duration: {route.duration} mins</p>
-                <p>Avg AQI: {Math.round(route.aqiScore)} ({getAqiLevel(route.aqiScore)})</p>
-                <div className="aqi-bar" style={{ width: `${Math.min(100, (route.aqiScore / 300) * 100)}%`, backgroundColor: getAqiColor(route.aqiScore) }}></div>
-              </div>
-            ))}
-          </div>
-          <button 
-            onClick={clearRoutePlanning}
-            className="clear-route-button"
-          >
-            Clear Route
-          </button>
-        </div>
+        <p className="no-data">No data available</p>
       )}
-
-      {/* Error Display */}
-      {error && <div className="error-message">{error}</div>}
-
-      {/* Main Content Grid */}
-      <div className="content-grid">
-        {/* AQI Card */}
-        <div className="card aqi-card">
-          <h2>Air Quality Index</h2>
-          {data ? (
-            <div className="aqi-display">
-              <div className={`aqi-value ${getAqiColor(data['Live AQI'])}`}>
-                {data['Live AQI']}
-              </div>
-              <div className="aqi-info">
-                <p className="aqi-level">Air Quality is {getAqiLevel(data['Live AQI'])}</p>
-                <div className="aqi-slider-container">
-                  <div className="aqi-slider-labels">
-                    <span>Good</span>
-                    <span>Moderate</span>
-                    <span>Poor</span>
-                    <span>Unhealthy</span>
-                    <span>Severe</span>
-                    <span>Hazardous</span>
-                  </div>
-                  <div className="aqi-slider-track">
-                    <div 
-                      className="aqi-slider-thumb"
-                      style={{ left: `${calculateSliderPosition(data['Live AQI'])}%` }}
-                    ></div>
-                  </div>
-                  <div className="aqi-slider-markers">
-                    <span>0</span>
-                    <span>50</span>
-                    <span>100</span>
-                    <span>150</span>
-                    <span>200</span>
-                    <span>300</span>
-                    <span>301+</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          ) : (
-            <p className="no-data">No data available</p>
-          )}
-        </div>
-
-        {/* Pollutant Data Card */}
-        <div className="card pollutant-card">
-          <h2>Pollutant Levels</h2>
-          {data ? (
-            <div className="pollutant-grid">
-              {pollutants.map((pollutant) => (
-                <div 
-                  key={pollutant.name}
-                  className={`pollutant-item ${selectedPollutant === pollutant.name ? 'selected' : ''}`}
-                  onClick={() => handlePollutantClick(pollutant.name)}
-                >
-                  <h3>{pollutant.label}</h3>
-                  <p className="pollutant-value">{data[pollutant.name]} {pollutant.unit}</p>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p className="no-data">No data available</p>
-          )}
-        </div>
-      </div>
-
-      {/* Map Card */}
-      <div className="card map-card">
-        <h2>Air Quality Map {selectedRoute && `- ${selectedRoute.summary}`}</h2>
-        <div className="map-container">
-          <iframe
-            src="/map/index.html"
-            name="qgis-map"
-            title="QGIS Map"
-            className="map-iframe"
-          ></iframe>
-        </div>
-      </div>
     </div>
-  );
+
+    {/* Pollutant Data Card */}
+    <div className="card pollutant-card">
+      <h2>Pollutant Levels</h2>
+      {data ? (
+        <div className="pollutant-grid">
+          {pollutants.map((pollutant) => (
+            <div 
+              key={pollutant.name}
+              className={`pollutant-item ${selectedPollutant === pollutant.name ? 'selected' : ''}`}
+              onClick={() => handlePollutantClick(pollutant.name)}
+            >
+              <h3>{pollutant.label}</h3>
+              <p className="pollutant-value">{data[pollutant.name]} {pollutant.unit}</p>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="no-data">No data available</p>
+      )}
+    </div>
+  </div>
+
+  {/* Map Card */}
+  <div className="card map-card">
+    <h2>Air Quality Map {selectedRoute && `- ${selectedRoute.summary}`}</h2>
+    <div className="map-container">
+      <iframe
+        src="/map/index.html"
+        name="qgis-map"
+        title="QGIS Map"
+        className="map-iframe"
+        ref={mapRef}
+      ></iframe>
+    </div>
+  </div>
+</div>
+);
 };
 
 export default App;
