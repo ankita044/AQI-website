@@ -134,8 +134,8 @@ const App = () => {
     }
   };
 
-  // Find the cleanest route based on AQI
-  const findCleanestRoute = async (start, end) => {
+   // Find the cleanest route based on AQI - Modified to process cities along route
+   const findCleanestRoute = async (start, end) => {
     setIsRouting(true);
     setError(null);
     
@@ -144,21 +144,41 @@ const App = () => {
         start: start,
         end: end,
         preferences: routePreferences
-      }, {
+      });
+      /*,{
         headers: {
           'Content-Type': 'application/json'
         }
-      });
+      }*/
 
       if (!response.data.routes || response.data.routes.length === 0) {
         throw new Error("No routes found between these locations");
       }
 
-      setRouteOptions(response.data.routes);
-      setSelectedRoute(response.data.routes[0]);
+      // Process routes with city names
+    const processedRoutes = await Promise.all(response.data.routes.map(async (route) => {
+      // Get city names for waypoints if available
+      let citiesAlongPath = [];
+      if (route.waypoints && route.waypoints.length > 0) {
+        citiesAlongPath = await Promise.all(
+          route.waypoints.map(async (point) => {
+            const city = await reverseGeocode(point.lat, point.lng);
+            return city || 'Unknown location';
+          })
+        );
+      }
+      
+      return {
+        ...route,
+        start: route.start_name || start,
+        end: route.end_name || end,
+        citiesAlongRoute: [route.start_name || start, ...citiesAlongPath, route.end_name || end]
+      };
+    }));
 
-      // Send route data to map with green color for selected route
-      updateMapWithRoutes(response.data.routes, response.data.routes[0].id);
+    setRouteOptions(processedRoutes);
+    setSelectedRoute(processedRoutes[0]);
+
 
       // Generate voice response
       const bestRoute = response.data.routes[0];
@@ -188,6 +208,25 @@ const App = () => {
       }
     } finally {
       setIsRouting(false);
+    }
+  };
+
+  // Helper function to extract cities from route geometry
+  const extractCitiesFromRoute = (route) => {
+    try {
+      if (!route.geometry || !route.geometry.coordinates) return [];
+      
+      // This is a simplified approach - you'll need to implement reverse geocoding
+      // for key points along the route in your backend
+      if (route.citiesAlongPath) {
+        return route.citiesAlongPath;
+      }
+      
+      // Fallback: just show start and end if no city data available
+      return [route.start, route.end];
+    } catch (error) {
+      console.error('Error extracting cities from route:', error);
+      return [route.start, route.end];
     }
   };
 
@@ -605,41 +644,62 @@ const App = () => {
       </div>
     </div>
 
-    {/* Route Results - Displayed below the route planning section */}
+    {/* Route Results - Updated to show cities along route */}
     {routeOptions && (
-      <div className="route-results-container">
-        <h4>Route Options (Sorted by Air Quality)</h4>
-        
-        <div className="route-options-list">
-          {routeOptions.map((route) => (
-            <div 
-              key={route.id}
-              className={`route-option ${selectedRoute?.id === route.id ? 'selected' : ''}`}
-              onClick={() => selectRoute(route.id)}
-            >
-              <div className="route-option-header">
-                <h5>{route.summary}</h5>
-                <div className={`health-impact ${getHealthImpactColor(route.healthImpact)}`}>
-                  {route.healthImpact} impact
-                </div>
-              </div>
-              
-              <div className="route-stats">
-                <div className="route-stat">
-                  <span className="stat-label">Distance:</span>
-                  <span className="stat-value">{route.distance} km</span>
-                </div>
-                <div className="route-stat">
-                  <span className="stat-label">Duration:</span>
-                  <span className="stat-value">{Math.round(route.duration)} mins</span>
-                </div>
-                <div className="route-stat">
-                  <span className="stat-label">Avg AQI:</span>
-                  <span className={`stat-value ${getAqiColor(Math.round(route.aqiScore))}`}>
-                    {Math.round(route.aqiScore)} ({getAqiLevel(route.aqiScore)})
-                  </span>
-                </div>
-              </div>
+  <div className="route-results-container">
+    <h4>Route Options (Sorted by Air Quality)</h4>
+    
+    <div className="route-options-list">
+      {routeOptions.map((route) => (
+        <div 
+          key={route.id}
+          className={`route-option ${selectedRoute?.id === route.id ? 'selected' : ''}`}
+          onClick={() => selectRoute(route.id)}
+        >
+          {/* First line: Start and Destination */}
+          <div className="route-locations">
+            <div className="location-item">
+              <span className="location-label">Start Location:</span>
+              <span className="location-value">{route.start}</span>
+            </div>
+            <div className="location-item">
+              <span className="location-label">Destination:</span>
+              <span className="location-value">{route.end}</span>
+            </div>
+          </div>
+
+          {/* Route Path */}
+          <div className="route-path">
+            <span className="path-label">Route:</span>
+            <div className="path-cities">
+              {route.citiesAlongRoute.map((city, index) => (
+                <React.Fragment key={index}>
+                  <span className="city-name">{city}</span>
+                  {index < route.citiesAlongRoute.length - 1 && (
+                    <span className="city-arrow"> → </span>
+                  )}
+                </React.Fragment>
+              ))}
+            </div>
+          </div>
+
+          {/* Stats in a row */}
+          <div className="route-stats-row">
+            <div className="route-stat">
+              <span className="stat-label">Distance:</span>
+              <span className="stat-value">{route.distance} km</span>
+            </div>
+            <div className="route-stat">
+              <span className="stat-label">Duration:</span>
+              <span className="stat-value">{Math.round(route.duration)} mins</span>
+            </div>
+            <div className="route-stat">
+              <span className="stat-label">Avg AQI:</span>
+              <span className={`stat-value ${getAqiColor(Math.round(route.aqiScore))}`}>
+                {Math.round(route.aqiScore)} ({getAqiLevel(route.aqiScore)})
+              </span>
+            </div>
+          </div>
               
               <div className="aqi-bar-container">
                 <div 

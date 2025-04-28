@@ -214,6 +214,21 @@ def sample_route_points(coordinates, max_points=7):
     return [{'lat': coordinates[i][0], 'lng': coordinates[i][1]} 
             for i in range(0, len(coordinates), step)][:max_points]
 
+def get_cities_along_route(coordinates, max_cities=5):
+    """Identify major cities along a route"""
+    cities = set()
+    
+    # Sample points along the route
+    step = max(1, len(coordinates) // (max_cities + 1))
+    sampled_points = [coordinates[i] for i in range(0, len(coordinates), step)][:max_cities + 2]
+    
+    for lat, lng in sampled_points:
+        city = reverse_geocode(lat, lng)
+        if city and city not in cities:
+            cities.add(city)
+    
+    return list(cities)
+
 @app.route('/get-routes', methods=['POST'])
 def get_routes():
     try:
@@ -222,24 +237,34 @@ def get_routes():
         end = data['end']      # {lat, lng} or string
         preferences = data.get('preferences', {
             'avoidHighAQI': False,
-            'balanceAQIAndTime': False
+            'balanceAQIAndTime': False,
+            'maxAdditionalTime': 20
         })
         
         if not OPENROUTE_API_KEY:
             return jsonify({'error': 'OpenRoute API key missing'}), 500
 
         # Geocode if locations are strings
+        start_name = None
+        end_name = None
+        
         if isinstance(start, str):
             start_coords = geocode_location(start)
             if not start_coords:
                 return jsonify({'error': f'Could not find start location: {start}'}), 400
             start = {'lat': start_coords['lat'], 'lng': start_coords['lng']}
+            start_name = start_coords['name']
             
         if isinstance(end, str):
             end_coords = geocode_location(end)
             if not end_coords:
                 return jsonify({'error': f'Could not find end location: {end}'}), 400
             end = {'lat': end_coords['lat'], 'lng': end_coords['lng']}
+            end_name = end_coords['name']
+
+        # Get start and end city names if not already available
+        start_name = start_name or reverse_geocode(start['lat'], start['lng']) or "Start"
+        end_name = end_name or reverse_geocode(end['lat'], end['lng']) or "End"
 
         # Get routes from OpenRouteService
         headers = {
@@ -292,18 +317,28 @@ def get_routes():
                 aqi_score = calculate_route_aqi(sampled_points)
                 if aqi_score is None:
                     continue
-                    
+                
+                # Get cities along route
+                cities_along_route = get_cities_along_route(coords)
+                
+                # Create route summary
+                if len(cities_along_route) > 2:
+                    summary = f"{start_name} → {cities_along_route[1]} → ... → {end_name}"
+                else:
+                    summary = f"{start_name} → {end_name}"
+                
                 processed_routes.append({
                     'id': f"route_{i}",
-                    'summary': f"Route {i+1}",
-                    'start_location': start,
-                    'end_location': end,
+                    'summary': summary,
+                    'start': start_name,
+                    'end': end_name,
                     'distance': round(route_data['summary']['distance'] / 1000, 1),
                     'duration': round(route_data['summary']['duration'] / 60, 1),
                     'geometry': route_data['geometry'],
                     'aqiScore': aqi_score,
                     'healthImpact': 'high' if aqi_score > 150 else 'moderate' if aqi_score > 100 else 'low',
                     'waypoints': sampled_points,
+                    'citiesAlongPath': cities_along_route,
                     'preference': route_preferences[i % len(route_preferences)]
                 })
             except Exception as e:
@@ -314,17 +349,36 @@ def get_routes():
             return jsonify({'error': 'Could not calculate AQI for any routes'}), 500
 
         # Sort based on preferences
-        if preferences.get('avoidHighAQI'):
+        if preferences.get('avoidHighAQI') and not preferences.get('balanceAQIAndTime'):
             processed_routes.sort(key=lambda x: x['aqiScore'])
         elif preferences.get('balanceAQIAndTime'):
-            processed_routes.sort(key=lambda x: (x['aqiScore'] * 0.7) + (x['duration'] * 0.3))
+            # Balance AQI and time with weighting
+            max_duration = max(r['duration'] for r in processed_routes)
+            max_aqi = max(r['aqiScore'] for r in processed_routes)
+            
+            for route in processed_routes:
+                # Normalize values between 0-1
+                norm_duration = route['duration'] / max_duration
+                norm_aqi = route['aqiScore'] / max_aqi
+                
+                # Calculate score with preference weighting
+                route['combinedScore'] = (norm_aqi * 0.7) + (norm_duration * 0.3)
+            
+            processed_routes.sort(key=lambda x: x['combinedScore'])
         else:
+            # Default: sort by duration
             processed_routes.sort(key=lambda x: x['duration'])
+
+        # Filter routes based on max additional time preference
+        if preferences.get('maxAdditionalTime') and len(processed_routes) > 1:
+            fastest_duration = processed_routes[0]['duration']
+            max_allowed_duration = fastest_duration * (1 + preferences['maxAdditionalTime'] / 100)
+            processed_routes = [r for r in processed_routes if r['duration'] <= max_allowed_duration]
 
         return jsonify({
             'routes': processed_routes,
-            'start_name': reverse_geocode(start['lat'], start['lng']) or "Start Location",
-            'end_name': reverse_geocode(end['lat'], end['lng']) or "End Location"
+            'start_name': start_name,
+            'end_name': end_name
         })
 
     except requests.exceptions.RequestException as e:
@@ -333,6 +387,7 @@ def get_routes():
     except Exception as e:
         app.logger.error(f"Unexpected error in get_routes: {str(e)}")
         return jsonify({'error': str(e)}), 500
+
 
 @app.route('/get-aqi-for-coords', methods=['POST'])
 def get_aqi_for_coords():

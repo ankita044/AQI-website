@@ -112,6 +112,245 @@
   cursor: not-allowed;
 }
 
+.route-cities {
+  margin-top: 10px;
+  padding: 8px;
+  background-color: #f5f5f5;
+  border-radius: 4px;
+}
+
+.cities-label {
+  font-weight: bold;
+  margin-right: 5px;
+}
+
+.cities-list {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-top: 5px;
+}
+
+.city-tag {
+  background-color: #e0e0e0;
+  padding: 3px 8px;
+  border-radius: 12px;
+  margin: 2px;
+  font-size: 0.9em;
+}
+
+.city-arrow {
+  color: #666;
+  margin: 0 3px;
+}
+
+/* Route Path Styling */
+.route-path {
+  display: flex;
+  align-items: center;
+  margin: 10px 0;
+  padding: 8px;
+  background-color: #f8f9fa;
+  border-radius: 8px;
+}
+
+.path-line {
+  height: 2px;
+  background-color: #6c757d;
+  flex-grow: 1;
+  margin: 0 10px;
+}
+
+.path-cities {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.path-city {
+  background-color: #e9ecef;
+  padding: 4px 8px;
+  border-radius: 12px;
+  font-size: 0.9em;
+}
+
+.path-arrow {
+  color: #6c757d;
+  margin: 0 3px;
+  font-weight: bold;
+}
+
+/* Route Stats Grid */
+.route-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin: 10px 0;
+}
+
+.route-stat-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 8px;
+  background-color: #f8f9fa;
+  border-radius: 8px;
+}
+
+.route-stat-item .stat-label {
+  font-size: 0.85em;
+  color: #6c757d;
+  margin-bottom: 4px;
+}
+
+/* Route Locations */
+.route-locations {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.location-item {
+  display: flex;
+  align-items: center;
+}
+
+.location-label {
+  font-weight: 600;
+  margin-right: 5px;
+  color: #333;
+}
+
+.location-value {
+  font-weight: 500;
+  color: #2c3e50;
+}
+
+/* Route Path Description */
+.route-path-description {
+  margin: 10px 0;
+  padding: 8px;
+  background-color: #f8f9fa;
+  border-radius: 6px;
+  font-size: 0.95em;
+  color: #555;
+}
+
+.route-cities {
+  display: inline;
+  font-weight: 500;
+  color: #2c3e50;
+}
+
+/* Route Stats Row */
+.route-stats-row {
+  display: flex;
+  justify-content: space-between;
+  margin: 12px 0;
+}
+
+.route-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex: 1;
+}
+
+.stat-label {
+  font-size: 0.85em;
+  color: #6c757d;
+  margin-bottom: 4px;
+}
+
+.stat-value {
+  font-weight: 600;
+  font-size: 1em;
+}
+
+/* Route Locations */
+.route-locations {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.location-item {
+  display: flex;
+  align-items: center;
+}
+
+.location-label {
+  font-weight: 600;
+  margin-right: 5px;
+  color: #333;
+}
+
+.location-value {
+  font-weight: 500;
+  color: #2c3e50;
+}
+
+/* Route Path Description */
+.route-path-description {
+  margin: 10px 0;
+  padding: 8px 0;
+}
+
+.route-cities {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px;
+}
+
+.city-name {
+  background-color: #e9ecef;
+  padding: 4px 8px;
+  border-radius: 12px;
+  font-size: 0.9em;
+}
+
+.city-arrow {
+  color: #6c757d;
+  font-weight: bold;
+}
+
+.direct-route {
+  font-style: italic;
+  color: #6c757d;
+}
+
+/* Route Stats Row */
+.route-stats-row {
+  display: flex;
+  justify-content: space-between;
+  margin: 12px 0;
+}
+
+.route-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex: 1;
+}
+
+.stat-label {
+  font-size: 0.85em;
+  color: #6c757d;
+  margin-bottom: 4px;
+}
+
+.stat-value {
+  font-weight: 600;
+  font-size: 1em;
+}
+
+.route-stat-item .stat-value {
+  font-weight: 600;
+  font-size: 1.1em;
+}
+
 .locate-button {
   background-color: #34a853;
   color: white;
